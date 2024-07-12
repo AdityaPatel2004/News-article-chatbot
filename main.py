@@ -3,21 +3,37 @@ import streamlit as st
 import time
 import requests
 import faiss
+import torch
+from PIL import Image
+from io import BytesIO
 from langchain import OpenAI
 from langchain.chains import RetrievalQAWithSourcesChain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.document_loaders import UnstructuredURLLoader
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
+from huggingface_hub import login
+from diffusers import StableDiffusionPipeline
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Ensure the OpenAI API key is available
+# Ensure the OpenAI API key and Hugging Face token are available
 if 'OPENAI_API_KEY' not in os.environ:
     st.error("Did not find openai_api_key, please add an environment variable `OPENAI_API_KEY` which contains it.")
     st.stop()
+if 'HUGGINGFACE_TOKEN' not in os.environ:
+    st.error("Did not find huggingface_token, please add an environment variable `HUGGINGFACE_TOKEN` which contains it.")
+    st.stop()
+
+# Login to Hugging Face
+login(os.getenv("HUGGINGFACE_TOKEN"))
+
+# Set up Stable Diffusion
+model_id = "CompVis/stable-diffusion-v1-4"
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+pipe = pipe.to("cpu")
 
 # Set up your Streamlit app
 st.title("AdiBot: News Research Tool 📈")
@@ -39,6 +55,11 @@ if "vectorstore_openai" not in st.session_state:
     st.session_state.vectorstore_openai = None
 if "embeddings" not in st.session_state:
     st.session_state.embeddings = None
+
+def generate_image(prompt):
+    with torch.no_grad():
+        image = pipe(prompt).images[0]
+    return image
 
 if process_url_clicked:
     # Load data
@@ -86,18 +107,7 @@ if query:
             sources_list = sources.split("\n")  # Split the sources by newline
             for source in sources_list:
                 st.write(source)
-
-        # Generate image with ComfyUI
-        comfyui_url = "http://192.168.29.15:42421/generate"
-        image_request_payload = {
-            "text": result["answer"],  # Assuming ComfyUI takes text input for image generation
-            "params": {}  # Add any necessary parameters for image generation
-        }
-        response = requests.post(comfyui_url, json=image_request_payload)
-
-        if response.status_code == 200:
-            image_data = response.json()
-            # Assuming the response contains the image URL or data
-            st.image(image_data["image_url"], caption="Generated Image")
-        else:
-            st.error("Failed to generate image with ComfyUI.")
+        
+        # Generate and display an image based on the answer
+        image = generate_image(result["answer"])
+        st.image(image, caption="Generated Image")
